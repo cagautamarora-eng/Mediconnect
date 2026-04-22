@@ -7,7 +7,7 @@ function generateOTP() { return Math.floor(100000 + Math.random() * 900000).toSt
 const C = {
   bg: "#F5F7FA", card: "#FFFFFF", primary: "#1A6B8A", primaryLight: "#E8F4F8",
   accent: "#2ECC9B", accentLight: "#E8FAF4", danger: "#E74C3C", dangerLight: "#FDECEA",
-  warning: "#F39C12", warningLight: "#FEF9E7",
+  warning: "#F39C12", warningLight: "#FEF9E7", purple: "#9B59B6", purpleLight: "#F3E8FF",
   text: "#1A2B3C", muted: "#7A8FA6", border: "#E2EAF0",
   shadow: "0 2px 12px rgba(26,107,138,0.08)",
 };
@@ -17,9 +17,16 @@ const s = {
   card: { background: C.card, borderRadius: 16, boxShadow: C.shadow, border: `1px solid ${C.border}` },
   input: { width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 14, fontFamily: "inherit", color: C.text, background: "#fff", outline: "none" },
   label: { fontSize: 11, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 6 },
-  btn: (v = "primary") => ({ padding: "10px 20px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 14, background: v === "primary" ? C.primary : v === "accent" ? C.accent : v === "danger" ? C.danger : v === "warning" ? C.warning : "#EDF2F7", color: v === "ghost" ? C.muted : "#fff" }),
+  btn: (v = "primary") => ({ padding: "10px 20px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 14, background: v === "primary" ? C.primary : v === "accent" ? C.accent : v === "danger" ? C.danger : v === "warning" ? C.warning : v === "purple" ? C.purple : "#EDF2F7", color: v === "ghost" ? C.muted : "#fff" }),
   badge: (color) => ({ display: "inline-block", borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 700, background: color + "22", color, border: `1px solid ${color}44` }),
 };
+
+const ROLES = [
+  { id: "patient", icon: "🧑", label: "Patient", color: C.accent, desc: "View your prescriptions & health records" },
+  { id: "doctor", icon: "👨‍⚕️", label: "Doctor", color: C.primary, desc: "Manage patients & write prescriptions" },
+  { id: "medical_store", icon: "🏪", label: "Medical Store", color: C.warning, desc: "Dispense medicines & manage orders" },
+  { id: "test_lab", icon: "🔬", label: "Test Lab", color: C.purple, desc: "Manage test bookings & reports" },
+];
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -45,17 +52,28 @@ export default function App() {
 
   const logout = async () => { await supabase.auth.signOut(); };
 
-  if (loading) return <div style={{ ...s.page, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ textAlign: "center" }}><div style={{ fontSize: 48, marginBottom: 16 }}>🏥</div><p style={{ color: C.muted }}>Loading MediConnect...</p></div></div>;
+  if (loading) return (
+    <div style={{ ...s.page, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🏥</div>
+        <p style={{ color: C.muted }}>Loading MediConnect...</p>
+      </div>
+    </div>
+  );
+
   if (!currentUser) return <AuthScreen onLogin={setCurrentUser} />;
   if (currentUser.role === "admin") return <AdminDashboard user={currentUser} onLogout={logout} />;
   if (currentUser.role === "doctor") return <DoctorDashboard user={currentUser} onLogout={logout} />;
   if (currentUser.role === "patient") return <PatientDashboard user={currentUser} onLogout={logout} />;
+  if (currentUser.role === "medical_store") return <MedicalStoreDashboard user={currentUser} onLogout={logout} />;
+  if (currentUser.role === "test_lab") return <TestLabDashboard user={currentUser} onLogout={logout} />;
 }
 
+// ─── AUTH SCREEN ──────────────────────────────────────────────────────────────
 function AuthScreen({ onLogin }) {
-  const [tab, setTab] = useState("login");
-  const [role, setRole] = useState("patient");
-  const [form, setForm] = useState({ name: "", email: "", password: "", specialization: "", age: "", bloodGroup: "" });
+  const [screen, setScreen] = useState("home"); // home | login | register
+  const [selectedRole, setSelectedRole] = useState(null);
+  const [form, setForm] = useState({ name: "", email: "", password: "", specialization: "", age: "", bloodGroup: "", storeName: "", address: "", licenseNo: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -78,53 +96,115 @@ function AuthScreen({ onLogin }) {
     try {
       const { data, error } = await supabase.auth.signUp({ email: form.email, password: form.password });
       if (error) throw error;
-      const newProfile = { id: data.user.id, name: form.name, email: form.email, role, unique_id: role === "doctor" ? `DOC-${uid()}` : `PAT-${uid()}`, approved: false, specialization: form.specialization || null, age: form.age ? parseInt(form.age) : null, blood_group: form.bloodGroup || null, password_hash: "supabase-auth" };
+
+      let uniqueId = `PAT-${uid()}`;
+      if (selectedRole === "doctor") uniqueId = `DOC-${uid()}`;
+      if (selectedRole === "medical_store") uniqueId = `MED-${uid()}`;
+      if (selectedRole === "test_lab") uniqueId = `LAB-${uid()}`;
+
+      const newProfile = {
+        id: data.user.id, name: form.name, email: form.email,
+        role: selectedRole, unique_id: uniqueId, approved: false,
+        password_hash: "supabase-auth",
+        specialization: form.specialization || null,
+        age: form.age ? parseInt(form.age) : null,
+        blood_group: form.bloodGroup || null,
+        store_name: form.storeName || null,
+        address: form.address || null,
+        license_no: form.licenseNo || null,
+      };
+
       const { error: profileError } = await supabase.from("users").insert(newProfile);
       if (profileError) throw profileError;
-      setTab("login");
-      setForm({ name: "", email: "", password: "", specialization: "", age: "", bloodGroup: "" });
+      setScreen("home");
+      setSelectedRole(null);
+      setForm({ name: "", email: "", password: "", specialization: "", age: "", bloodGroup: "", storeName: "", address: "", licenseNo: "" });
       alert("Registration successful! Please wait for admin approval.");
     } catch (err) { setError(err.message); }
     setLoading(false);
   }
 
+  // HOME SCREEN — Role Selection
+  if (screen === "home") return (
+    <div style={{ ...s.page, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 480 }}>
+        <div style={{ textAlign: "center", marginBottom: 36 }}>
+          <div style={{ fontSize: 56, marginBottom: 12 }}>🏥</div>
+          <h1 style={{ margin: 0, fontSize: 32, color: C.primary, letterSpacing: -0.5 }}>MediConnect</h1>
+          <p style={{ margin: "6px 0 0", color: C.muted, fontSize: 14 }}>India's Complete Healthcare Platform</p>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
+          {ROLES.map(role => (
+            <button key={role.id} onClick={() => { setSelectedRole(role.id); setScreen("login"); setError(""); }} style={{
+              ...s.card, padding: 20, border: `2px solid ${role.color}33`,
+              cursor: "pointer", textAlign: "center", background: "#fff",
+              transition: "all 0.2s", fontFamily: "inherit",
+            }}>
+              <div style={{ fontSize: 36, marginBottom: 8 }}>{role.icon}</div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: role.color, marginBottom: 4 }}>{role.label}</div>
+              <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.4 }}>{role.desc}</div>
+            </button>
+          ))}
+        </div>
+
+        <div style={{ textAlign: "center", padding: "14px", background: C.primaryLight, borderRadius: 12 }}>
+          <span style={{ color: C.muted, fontSize: 13 }}>Admin? </span>
+          <button onClick={() => { setSelectedRole("admin"); setScreen("login"); setError(""); }} style={{ background: "none", border: "none", color: C.primary, fontWeight: 700, cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>Login here →</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const roleInfo = ROLES.find(r => r.id === selectedRole) || { icon: "🔐", label: "Admin", color: C.danger };
+
+  // LOGIN / REGISTER SCREEN
   return (
     <div style={{ ...s.page, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ width: "100%", maxWidth: 420 }}>
-        <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{ fontSize: 48, marginBottom: 8 }}>🏥</div>
-          <h1 style={{ margin: 0, fontSize: 28, color: C.primary }}>MediConnect</h1>
-          <p style={{ margin: "4px 0 0", color: C.muted, fontSize: 13 }}>Clinic Management Portal</p>
+        <button onClick={() => { setScreen("home"); setSelectedRole(null); setError(""); }} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 14, marginBottom: 16, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>← Back</button>
+
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ fontSize: 40, marginBottom: 6 }}>{roleInfo.icon}</div>
+          <h2 style={{ margin: 0, fontSize: 22, color: roleInfo.color }}>{roleInfo.label} Portal</h2>
+          <p style={{ margin: "4px 0 0", color: C.muted, fontSize: 13 }}>MediConnect</p>
         </div>
+
         <div style={{ ...s.card, padding: 28 }}>
-          <div style={{ display: "flex", background: C.bg, borderRadius: 10, padding: 4, marginBottom: 24 }}>
-            {["login", "register"].map(t => (
-              <button key={t} onClick={() => { setTab(t); setError(""); }} style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", fontFamily: "inherit", fontSize: 13, cursor: "pointer", background: tab === t ? C.card : "transparent", color: tab === t ? C.primary : C.muted, fontWeight: tab === t ? 700 : 400 }}>{t === "login" ? "Login" : "Register"}</button>
-            ))}
-          </div>
-          {tab === "register" && (
-            <div style={{ marginBottom: 16 }}>
-              <label style={s.label}>I am a</label>
-              <div style={{ display: "flex", gap: 8 }}>
-                {["patient", "doctor"].map(r => (
-                  <button key={r} onClick={() => setRole(r)} style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: `2px solid ${role === r ? C.primary : C.border}`, background: role === r ? C.primaryLight : "#fff", color: role === r ? C.primary : C.muted, cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13 }}>{r === "doctor" ? "👨‍⚕️ Doctor" : "🧑 Patient"}</button>
-                ))}
-              </div>
+          {selectedRole !== "admin" && (
+            <div style={{ display: "flex", background: C.bg, borderRadius: 10, padding: 4, marginBottom: 24 }}>
+              {["login", "register"].map(t => (
+                <button key={t} onClick={() => { setScreen(t === "login" ? "login" : "register"); setError(""); }} style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", fontFamily: "inherit", fontSize: 13, cursor: "pointer", background: screen === t ? C.card : "transparent", color: screen === t ? roleInfo.color : C.muted, fontWeight: screen === t ? 700 : 400 }}>{t === "login" ? "Login" : "Register"}</button>
+              ))}
             </div>
           )}
-          {tab === "register" && <Field label="Full Name" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="Your full name" />}
+
+          {screen === "register" && <Field label="Full Name" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="Your full name" />}
           <Field label="Email" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="email@example.com" type="email" />
           <Field label="Password" value={form.password} onChange={v => setForm(f => ({ ...f, password: v }))} placeholder="Password (min 6 chars)" type="password" />
-          {tab === "register" && role === "doctor" && <Field label="Specialization" value={form.specialization} onChange={v => setForm(f => ({ ...f, specialization: v }))} placeholder="e.g. Cardiologist" />}
-          {tab === "register" && role === "patient" && (
+
+          {screen === "register" && selectedRole === "doctor" && (
+            <Field label="Specialization" value={form.specialization} onChange={v => setForm(f => ({ ...f, specialization: v }))} placeholder="e.g. Cardiologist" />
+          )}
+          {screen === "register" && selectedRole === "patient" && (
             <div style={{ display: "flex", gap: 10 }}>
               <div style={{ flex: 1 }}><Field label="Age" value={form.age} onChange={v => setForm(f => ({ ...f, age: v }))} placeholder="25" type="number" /></div>
               <div style={{ flex: 1 }}><Field label="Blood Group" value={form.bloodGroup} onChange={v => setForm(f => ({ ...f, bloodGroup: v }))} placeholder="O+" /></div>
             </div>
           )}
+          {screen === "register" && (selectedRole === "medical_store" || selectedRole === "test_lab") && (
+            <>
+              <Field label={selectedRole === "medical_store" ? "Store Name" : "Lab Name"} value={form.storeName} onChange={v => setForm(f => ({ ...f, storeName: v }))} placeholder={selectedRole === "medical_store" ? "e.g. City Pharmacy" : "e.g. HealthPath Labs"} />
+              <Field label="Address" value={form.address} onChange={v => setForm(f => ({ ...f, address: v }))} placeholder="Full address" />
+              <Field label="License Number" value={form.licenseNo} onChange={v => setForm(f => ({ ...f, licenseNo: v }))} placeholder="License/Registration No." />
+            </>
+          )}
+
           {error && <p style={{ color: C.danger, fontSize: 13, marginBottom: 14, padding: "8px 12px", background: C.dangerLight, borderRadius: 8 }}>{error}</p>}
-          <button onClick={tab === "login" ? handleLogin : handleRegister} disabled={loading} style={{ ...s.btn("primary"), width: "100%", padding: "12px", opacity: loading ? 0.7 : 1 }}>
-            {loading ? "Please wait..." : tab === "login" ? "Login" : "Register"}
+
+          <button onClick={screen === "register" ? handleRegister : handleLogin} disabled={loading}
+            style={{ ...s.btn("primary"), width: "100%", padding: "12px", opacity: loading ? 0.7 : 1, background: roleInfo.color }}>
+            {loading ? "Please wait..." : screen === "register" ? "Register" : "Login"}
           </button>
         </div>
       </div>
@@ -132,6 +212,7 @@ function AuthScreen({ onLogin }) {
   );
 }
 
+// ─── ADMIN DASHBOARD ──────────────────────────────────────────────────────────
 function AdminDashboard({ user, onLogout }) {
   const [tab, setTab] = useState("overview");
   const [users, setUsers] = useState([]);
@@ -147,6 +228,8 @@ function AdminDashboard({ user, onLogout }) {
 
   const doctors = users.filter(u => u.role === "doctor");
   const patients = users.filter(u => u.role === "patient");
+  const stores = users.filter(u => u.role === "medical_store");
+  const labs = users.filter(u => u.role === "test_lab");
   const pending = users.filter(u => u.role !== "admin" && !u.approved);
 
   async function approve(id) { await supabase.from("users").update({ approved: true }).eq("id", id); fetchData(); }
@@ -154,15 +237,17 @@ function AdminDashboard({ user, onLogout }) {
 
   return (
     <Layout user={user} onLogout={onLogout} role="admin"
-      tabs={[["overview", "📊 Overview"], ["doctors", "👨‍⚕️ Doctors"], ["patients", "🧑 Patients"], ["pending", `⏳ Pending${pending.length ? ` (${pending.length})` : ""}`]]}
+      tabs={[["overview", "📊 Overview"], ["doctors", "👨‍⚕️ Doctors"], ["patients", "🧑 Patients"], ["stores", "🏪 Stores"], ["labs", "🔬 Labs"], ["pending", `⏳ Pending${pending.length ? ` (${pending.length})` : ""}`]]}
       activeTab={tab} onTabChange={setTab}
     >
       {tab === "overview" && (
         <div>
           <h2 style={headingStyle}>Dashboard Overview</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 16, marginBottom: 28 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 14, marginBottom: 28 }}>
             <StatCard icon="👨‍⚕️" label="Doctors" value={doctors.length} color={C.primary} />
             <StatCard icon="🧑" label="Patients" value={patients.length} color={C.accent} />
+            <StatCard icon="🏪" label="Med Stores" value={stores.length} color={C.warning} />
+            <StatCard icon="🔬" label="Test Labs" value={labs.length} color={C.purple} />
             <StatCard icon="📋" label="Prescriptions" value={prescriptions.length} color="#9B59B6" />
             <StatCard icon="⏳" label="Pending" value={pending.length} color={C.danger} />
           </div>
@@ -172,11 +257,14 @@ function AdminDashboard({ user, onLogout }) {
       )}
       {tab === "doctors" && <div><h2 style={headingStyle}>Registered Doctors</h2>{doctors.length === 0 ? <Empty text="No doctors yet." /> : doctors.map(d => <UserCard key={d.id} user={d} extra={d.specialization} onDelete={() => reject(d.id)} />)}</div>}
       {tab === "patients" && <div><h2 style={headingStyle}>Registered Patients</h2>{patients.length === 0 ? <Empty text="No patients yet." /> : patients.map(p => <UserCard key={p.id} user={p} extra={`Age ${p.age} • ${p.blood_group}`} onDelete={() => reject(p.id)} />)}</div>}
+      {tab === "stores" && <div><h2 style={headingStyle}>Medical Stores</h2>{stores.length === 0 ? <Empty text="No stores yet." /> : stores.map(s => <UserCard key={s.id} user={s} extra={s.store_name || s.address} onDelete={() => reject(s.id)} />)}</div>}
+      {tab === "labs" && <div><h2 style={headingStyle}>Test Labs</h2>{labs.length === 0 ? <Empty text="No labs yet." /> : labs.map(l => <UserCard key={l.id} user={l} extra={l.store_name || l.address} onDelete={() => reject(l.id)} />)}</div>}
       {tab === "pending" && <div><h2 style={headingStyle}>Pending Approvals</h2>{pending.length === 0 ? <Empty text="No pending approvals." /> : pending.map(u => <PendingCard key={u.id} user={u} onApprove={() => approve(u.id)} onReject={() => reject(u.id)} />)}</div>}
     </Layout>
   );
 }
 
+// ─── DOCTOR DASHBOARD ─────────────────────────────────────────────────────────
 function DoctorDashboard({ user, onLogout }) {
   const [tab, setTab] = useState("find");
   const [searchId, setSearchId] = useState("");
@@ -221,21 +309,17 @@ function DoctorDashboard({ user, onLogout }) {
   }
 
   async function verifyOTP() {
-    // Check if patient approved this OTP
     const { data: otpData } = await supabase.from("otp_requests").select("*").eq("id", otpRequestId).single();
-    
     if (otpData?.patient_approved) {
-      setAccessGranted(true);
-      setOtpError("");
+      setAccessGranted(true); setOtpError("");
       const { data } = await supabase.from("prescriptions").select(`*, prescription_medicines(*), doctor:doctor_id(name, specialization)`).eq("patient_id", searchResult.id).order("date", { ascending: false });
       setPatientPrescriptions(data || []);
     } else if (otpInput === otpCode) {
-      setAccessGranted(true);
-      setOtpError("");
+      setAccessGranted(true); setOtpError("");
       const { data } = await supabase.from("prescriptions").select(`*, prescription_medicines(*), doctor:doctor_id(name, specialization)`).eq("patient_id", searchResult.id).order("date", { ascending: false });
       setPatientPrescriptions(data || []);
     } else {
-      setOtpError("Invalid OTP or patient hasn't approved yet. Try again.");
+      setOtpError("Invalid OTP or patient hasn't approved yet.");
     }
   }
 
@@ -243,8 +327,7 @@ function DoctorDashboard({ user, onLogout }) {
     const { data: rx, error } = await supabase.from("prescriptions").insert({ diagnosis: rxData.diagnosis, notes: rxData.notes, doctor_id: user.id, patient_id: searchResult.id }).select().single();
     if (error) { alert("Error saving prescription!"); return; }
     await supabase.from("prescription_medicines").insert(rxData.medicines.map(m => ({ medicine_name: m.name, dosage: m.dosage, frequency: m.frequency, duration: m.duration, prescription_id: rx.id })));
-    setShowRxForm(false);
-    fetchMyPrescriptions();
+    setShowRxForm(false); fetchMyPrescriptions();
     const { data } = await supabase.from("prescriptions").select(`*, prescription_medicines(*), doctor:doctor_id(name, specialization)`).eq("patient_id", searchResult.id).order("date", { ascending: false });
     setPatientPrescriptions(data || []);
     alert("Prescription saved!");
@@ -265,7 +348,6 @@ function DoctorDashboard({ user, onLogout }) {
       {tab === "find" && !showRxForm && (
         <div>
           <h2 style={headingStyle}>Find Patient</h2>
-
           {!searchResult && (
             <div style={{ ...s.card, padding: 20, marginBottom: 20 }}>
               <div style={{ fontWeight: 700, color: C.primary, marginBottom: 8 }}>Step 1: Enter Patient Unique ID</div>
@@ -276,7 +358,6 @@ function DoctorDashboard({ user, onLogout }) {
               {searchError && <p style={{ color: C.danger, fontSize: 13, marginTop: 10 }}>{searchError}</p>}
             </div>
           )}
-
           {searchResult && !otpSent && (
             <div style={{ ...s.card, padding: 20, marginBottom: 20 }}>
               <div style={{ fontWeight: 700, color: C.primary, marginBottom: 12 }}>Step 2: Patient Found</div>
@@ -286,19 +367,16 @@ function DoctorDashboard({ user, onLogout }) {
               </div>
               <div style={{ display: "flex", gap: 10 }}>
                 <button onClick={resetSearch} style={{ ...s.btn("ghost"), flex: 1 }}>← Back</button>
-                <button onClick={sendOTP} disabled={loading} style={{ ...s.btn("primary"), flex: 2 }}>
-                  {loading ? "Sending..." : "📲 Send Access Request to Patient"}
-                </button>
+                <button onClick={sendOTP} disabled={loading} style={{ ...s.btn("primary"), flex: 2 }}>{loading ? "Sending..." : "📲 Send Access Request to Patient"}</button>
               </div>
             </div>
           )}
-
           {searchResult && otpSent && !accessGranted && (
             <div style={{ ...s.card, padding: 20, marginBottom: 20 }}>
               <div style={{ fontWeight: 700, color: C.primary, marginBottom: 12 }}>Step 3: Waiting for Patient Approval</div>
               <div style={{ padding: 16, background: C.warningLight, borderRadius: 12, marginBottom: 16, border: `1px solid ${C.warning}44` }}>
                 <div style={{ fontWeight: 700, color: C.warning, marginBottom: 4 }}>⏳ Request Sent!</div>
-                <p style={{ color: C.muted, fontSize: 13, margin: 0 }}>Patient ke app mein OTP request gayi hai. Patient OTP approve karega aur tumhe batayega.</p>
+                <p style={{ color: C.muted, fontSize: 13, margin: 0 }}>Patient ke app mein OTP request gayi hai.</p>
               </div>
               <Field label="Patient ne OTP bataya? Enter karo:" value={otpInput} onChange={setOtpInput} placeholder="6-digit OTP" />
               {otpError && <p style={{ color: C.danger, fontSize: 13, marginBottom: 10 }}>{otpError}</p>}
@@ -308,7 +386,6 @@ function DoctorDashboard({ user, onLogout }) {
               </div>
             </div>
           )}
-
           {searchResult && accessGranted && (
             <div>
               <div style={{ ...s.card, padding: 16, marginBottom: 20, background: C.accentLight, border: `1px solid ${C.accent}44` }}>
@@ -330,11 +407,7 @@ function DoctorDashboard({ user, onLogout }) {
           )}
         </div>
       )}
-
-      {tab === "find" && showRxForm && (
-        <PrescriptionForm patient={searchResult} onSave={savePrescription} onCancel={() => setShowRxForm(false)} />
-      )}
-
+      {tab === "find" && showRxForm && <PrescriptionForm patient={searchResult} onSave={savePrescription} onCancel={() => setShowRxForm(false)} />}
       {tab === "myprescriptions" && (
         <div>
           <h2 style={headingStyle}>My Prescriptions</h2>
@@ -346,6 +419,7 @@ function DoctorDashboard({ user, onLogout }) {
   );
 }
 
+// ─── PATIENT DASHBOARD ────────────────────────────────────────────────────────
 function PatientDashboard({ user, onLogout }) {
   const [tab, setTab] = useState("requests");
   const [prescriptions, setPrescriptions] = useState([]);
@@ -354,7 +428,6 @@ function PatientDashboard({ user, onLogout }) {
   useEffect(() => {
     fetchPrescriptions();
     fetchPendingRequests();
-    // Poll every 10 seconds for new requests
     const interval = setInterval(fetchPendingRequests, 10000);
     return () => clearInterval(interval);
   }, []);
@@ -365,13 +438,7 @@ function PatientDashboard({ user, onLogout }) {
   }
 
   async function fetchPendingRequests() {
-    const { data } = await supabase
-      .from("otp_requests")
-      .select(`*, doctor:doctor_id(name, specialization)`)
-      .eq("patient_id", user.id)
-      .eq("used", false)
-      .gt("expires_at", new Date().toISOString())
-      .order("created_at", { ascending: false });
+    const { data } = await supabase.from("otp_requests").select(`*, doctor:doctor_id(name, specialization)`).eq("patient_id", user.id).eq("used", false).gt("expires_at", new Date().toISOString()).order("created_at", { ascending: false });
     setPendingRequests(data || []);
   }
 
@@ -388,50 +455,28 @@ function PatientDashboard({ user, onLogout }) {
 
   return (
     <Layout user={user} onLogout={onLogout} role="patient"
-      tabs={[
-        ["requests", `🔔 Requests${pendingRequests.length ? ` (${pendingRequests.length})` : ""}`],
-        ["prescriptions", "📋 Prescriptions"],
-        ["profile", "👤 Profile"]
-      ]}
+      tabs={[["requests", `🔔 Requests${pendingRequests.length ? ` (${pendingRequests.length})` : ""}`], ["prescriptions", "📋 Prescriptions"], ["profile", "👤 Profile"]]}
       activeTab={tab} onTabChange={setTab} subtitle={`ID: ${user.unique_id}`}
     >
       {tab === "requests" && (
         <div>
           <h2 style={headingStyle}>Doctor Access Requests</h2>
           {pendingRequests.length === 0 ? (
-            <div>
-              <Empty text="No pending requests." />
-              <p style={{ textAlign: "center", color: C.muted, fontSize: 13 }}>Jab koi doctor tumhara data access karna chahega — yahan dikhega!</p>
-            </div>
-          ) : (
-            pendingRequests.map(req => (
-              <div key={req.id} style={{ ...s.card, padding: 20, marginBottom: 14, borderLeft: `4px solid ${C.warning}` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>
-                      👨‍⚕️ Dr. {req.doctor?.name}
-                    </div>
-                    <div style={{ color: C.muted, fontSize: 13, marginBottom: 4 }}>
-                      {req.doctor?.specialization}
-                    </div>
-                    <div style={{ color: C.muted, fontSize: 12 }}>
-                      Request time: {new Date(req.created_at).toLocaleTimeString()}
-                    </div>
-                    <div style={{ marginTop: 8, padding: "6px 12px", background: C.warningLight, borderRadius: 8, fontSize: 13, color: C.warning, fontWeight: 600 }}>
-                      ⚠️ Ye doctor tumhari saari prescriptions dekhna chahta hai
-                    </div>
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-                  <button onClick={() => rejectRequest(req.id)} style={{ ...s.btn("danger"), flex: 1 }}>✕ Reject</button>
-                  <button onClick={() => approveRequest(req)} style={{ ...s.btn("accent"), flex: 2 }}>✓ Approve & Show OTP</button>
-                </div>
+            <div><Empty text="No pending requests." /><p style={{ textAlign: "center", color: C.muted, fontSize: 13 }}>Jab koi doctor tumhara data access karna chahega — yahan dikhega!</p></div>
+          ) : pendingRequests.map(req => (
+            <div key={req.id} style={{ ...s.card, padding: 20, marginBottom: 14, borderLeft: `4px solid ${C.warning}` }}>
+              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>👨‍⚕️ Dr. {req.doctor?.name}</div>
+              <div style={{ color: C.muted, fontSize: 13, marginBottom: 4 }}>{req.doctor?.specialization}</div>
+              <div style={{ color: C.muted, fontSize: 12 }}>Request time: {new Date(req.created_at).toLocaleTimeString()}</div>
+              <div style={{ marginTop: 8, padding: "6px 12px", background: C.warningLight, borderRadius: 8, fontSize: 13, color: C.warning, fontWeight: 600 }}>⚠️ Ye doctor tumhari saari prescriptions dekhna chahta hai</div>
+              <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                <button onClick={() => rejectRequest(req.id)} style={{ ...s.btn("danger"), flex: 1 }}>✕ Reject</button>
+                <button onClick={() => approveRequest(req)} style={{ ...s.btn("accent"), flex: 2 }}>✓ Approve & Show OTP</button>
               </div>
-            ))
-          )}
+            </div>
+          ))}
         </div>
       )}
-
       {tab === "prescriptions" && (
         <div>
           <h2 style={headingStyle}>My Prescriptions ({prescriptions.length})</h2>
@@ -439,7 +484,6 @@ function PatientDashboard({ user, onLogout }) {
             prescriptions.map(rx => <RxCard key={rx.id} rx={rx} showDoctor doctor={rx.doctor} />)}
         </div>
       )}
-
       {tab === "profile" && (
         <div>
           <h2 style={headingStyle}>My Profile</h2>
@@ -460,6 +504,53 @@ function PatientDashboard({ user, onLogout }) {
   );
 }
 
+// ─── MEDICAL STORE DASHBOARD ──────────────────────────────────────────────────
+function MedicalStoreDashboard({ user, onLogout }) {
+  return (
+    <Layout user={user} onLogout={onLogout} role="medical_store"
+      tabs={[["orders", "📦 Orders"], ["profile", "🏪 Profile"]]}
+      activeTab="orders" onTabChange={() => {}} subtitle={user.store_name}
+    >
+      <div>
+        <h2 style={headingStyle}>Medical Store Dashboard</h2>
+        <div style={{ ...s.card, padding: 24, textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>🏪</div>
+          <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>{user.store_name || user.name}</div>
+          <div style={{ color: C.muted, fontSize: 13, marginBottom: 4 }}>{user.address}</div>
+          <div style={{ color: C.muted, fontSize: 13 }}>License: {user.license_no}</div>
+          <div style={{ marginTop: 16, padding: "10px 20px", background: C.warningLight, borderRadius: 10, color: C.warning, fontSize: 13, fontWeight: 600 }}>
+            🚧 Prescription orders feature coming soon!
+          </div>
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+// ─── TEST LAB DASHBOARD ───────────────────────────────────────────────────────
+function TestLabDashboard({ user, onLogout }) {
+  return (
+    <Layout user={user} onLogout={onLogout} role="test_lab"
+      tabs={[["bookings", "🔬 Bookings"], ["profile", "🏥 Profile"]]}
+      activeTab="bookings" onTabChange={() => {}} subtitle={user.store_name}
+    >
+      <div>
+        <h2 style={headingStyle}>Test Lab Dashboard</h2>
+        <div style={{ ...s.card, padding: 24, textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>🔬</div>
+          <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>{user.store_name || user.name}</div>
+          <div style={{ color: C.muted, fontSize: 13, marginBottom: 4 }}>{user.address}</div>
+          <div style={{ color: C.muted, fontSize: 13 }}>License: {user.license_no}</div>
+          <div style={{ marginTop: 16, padding: "10px 20px", background: C.purpleLight, borderRadius: 10, color: C.purple, fontSize: 13, fontWeight: 600 }}>
+            🚧 Test booking feature coming soon!
+          </div>
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+// ─── PRESCRIPTION FORM ────────────────────────────────────────────────────────
 function PrescriptionForm({ patient, onSave, onCancel }) {
   const [diagnosis, setDiagnosis] = useState("");
   const [notes, setNotes] = useState("");
@@ -506,6 +597,7 @@ function PrescriptionForm({ patient, onSave, onCancel }) {
   );
 }
 
+// ─── RX CARD ─────────────────────────────────────────────────────────────────
 function RxCard({ rx, doctor, patient, showDoctor, showPatient }) {
   const [open, setOpen] = useState(false);
   const medicines = rx.prescription_medicines || [];
@@ -540,9 +632,11 @@ function RxCard({ rx, doctor, patient, showDoctor, showPatient }) {
   );
 }
 
+// ─── SHARED COMPONENTS ────────────────────────────────────────────────────────
 function Layout({ user, onLogout, role, tabs, activeTab, onTabChange, subtitle, children }) {
-  const roleColors = { admin: "#E74C3C", doctor: C.primary, patient: C.accent };
-  const roleColor = roleColors[role];
+  const roleColors = { admin: "#E74C3C", doctor: C.primary, patient: C.accent, medical_store: C.warning, test_lab: C.purple };
+  const roleLabels = { admin: "ADMIN", doctor: "DOCTOR", patient: "PATIENT", medical_store: "MED STORE", test_lab: "TEST LAB" };
+  const roleColor = roleColors[role] || C.primary;
   return (
     <div style={s.page}>
       <div style={{ background: "#fff", borderBottom: `3px solid ${roleColor}`, boxShadow: "0 2px 12px rgba(0,0,0,0.06)", position: "sticky", top: 0, zIndex: 100 }}>
@@ -552,13 +646,13 @@ function Layout({ user, onLogout, role, tabs, activeTab, onTabChange, subtitle, 
             <div><div style={{ fontWeight: 800, fontSize: 18, color: C.primary }}>MediConnect</div><div style={{ fontSize: 11, color: C.muted }}>{user.name}{subtitle ? ` • ${subtitle}` : ""}</div></div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={s.badge(roleColor)}>{role.toUpperCase()}</span>
+            <span style={s.badge(roleColor)}>{roleLabels[role] || role.toUpperCase()}</span>
             <button onClick={onLogout} style={{ ...s.btn("ghost"), padding: "6px 12px", fontSize: 12 }}>Logout</button>
           </div>
         </div>
-        <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 20px", display: "flex" }}>
+        <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 20px", display: "flex", overflowX: "auto" }}>
           {tabs.map(([t, label]) => (
-            <button key={t} onClick={() => onTabChange(t)} style={{ padding: "10px 18px", border: "none", borderBottom: `3px solid ${activeTab === t ? roleColor : "transparent"}`, background: "transparent", fontFamily: "inherit", fontSize: 13, cursor: "pointer", color: activeTab === t ? roleColor : C.muted, fontWeight: activeTab === t ? 700 : 400, marginBottom: -3 }}>{label}</button>
+            <button key={t} onClick={() => onTabChange(t)} style={{ padding: "10px 18px", border: "none", borderBottom: `3px solid ${activeTab === t ? roleColor : "transparent"}`, background: "transparent", fontFamily: "inherit", fontSize: 13, cursor: "pointer", color: activeTab === t ? roleColor : C.muted, fontWeight: activeTab === t ? 700 : 400, marginBottom: -3, whiteSpace: "nowrap" }}>{label}</button>
           ))}
         </div>
       </div>
@@ -572,9 +666,11 @@ function StatCard({ icon, label, value, color }) {
 }
 
 function PendingCard({ user, onApprove, onReject }) {
+  const roleColors = { doctor: C.primary, patient: C.accent, medical_store: C.warning, test_lab: C.purple };
+  const roleColor = roleColors[user.role] || C.muted;
   return (
     <div style={{ ...s.card, padding: 16, marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center", borderLeft: `4px solid ${C.danger}` }}>
-      <div><div style={{ fontWeight: 700 }}>{user.name} <span style={s.badge(user.role === "doctor" ? C.primary : C.accent)}>{user.role}</span></div><div style={{ color: C.muted, fontSize: 12 }}>{user.email}{user.specialization ? ` • ${user.specialization}` : ""}</div></div>
+      <div><div style={{ fontWeight: 700 }}>{user.name} <span style={s.badge(roleColor)}>{user.role}</span></div><div style={{ color: C.muted, fontSize: 12 }}>{user.email}{user.specialization ? ` • ${user.specialization}` : ""}{user.store_name ? ` • ${user.store_name}` : ""}</div></div>
       <div style={{ display: "flex", gap: 8 }}><button onClick={onApprove} style={s.btn("accent")}>✓ Approve</button><button onClick={onReject} style={s.btn("danger")}>✕ Reject</button></div>
     </div>
   );
