@@ -7,6 +7,7 @@ function generateOTP() { return Math.floor(100000 + Math.random() * 900000).toSt
 const C = {
   bg: "#F5F7FA", card: "#FFFFFF", primary: "#1A6B8A", primaryLight: "#E8F4F8",
   accent: "#2ECC9B", accentLight: "#E8FAF4", danger: "#E74C3C", dangerLight: "#FDECEA",
+  warning: "#F39C12", warningLight: "#FEF9E7",
   text: "#1A2B3C", muted: "#7A8FA6", border: "#E2EAF0",
   shadow: "0 2px 12px rgba(26,107,138,0.08)",
 };
@@ -16,7 +17,7 @@ const s = {
   card: { background: C.card, borderRadius: 16, boxShadow: C.shadow, border: `1px solid ${C.border}` },
   input: { width: "100%", boxSizing: "border-box", border: `1.5px solid ${C.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 14, fontFamily: "inherit", color: C.text, background: "#fff", outline: "none" },
   label: { fontSize: 11, fontWeight: 700, color: C.muted, letterSpacing: 1, textTransform: "uppercase", display: "block", marginBottom: 6 },
-  btn: (v = "primary") => ({ padding: "10px 20px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 14, background: v === "primary" ? C.primary : v === "accent" ? C.accent : v === "danger" ? C.danger : "#EDF2F7", color: v === "ghost" ? C.muted : "#fff" }),
+  btn: (v = "primary") => ({ padding: "10px 20px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 14, background: v === "primary" ? C.primary : v === "accent" ? C.accent : v === "danger" ? C.danger : v === "warning" ? C.warning : "#EDF2F7", color: v === "ghost" ? C.muted : "#fff" }),
   badge: (color) => ({ display: "inline-block", borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 700, background: color + "22", color, border: `1px solid ${color}44` }),
 };
 
@@ -190,15 +191,12 @@ function DoctorDashboard({ user, onLogout }) {
   const [showRxForm, setShowRxForm] = useState(false);
   const [myPrescriptions, setMyPrescriptions] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [otpRequestId, setOtpRequestId] = useState(null);
 
   useEffect(() => { fetchMyPrescriptions(); }, []);
 
   async function fetchMyPrescriptions() {
-    const { data } = await supabase
-      .from("prescriptions")
-      .select(`*, prescription_medicines(*), patient:patient_id(name, unique_id, age, blood_group)`)
-      .eq("doctor_id", user.id)
-      .order("date", { ascending: false });
+    const { data } = await supabase.from("prescriptions").select(`*, prescription_medicines(*), patient:patient_id(name, unique_id, age, blood_group)`).eq("doctor_id", user.id).order("date", { ascending: false });
     setMyPrescriptions(data || []);
   }
 
@@ -213,48 +211,40 @@ function DoctorDashboard({ user, onLogout }) {
     setLoading(true);
     const otp = generateOTP();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-
-    await supabase.from("otp_requests").insert({
-      doctor_id: user.id,
-      patient_id: searchResult.id,
-      otp_code: otp,
-      expires_at: expiresAt,
-    });
-
+    const { data: otpData } = await supabase.from("otp_requests").insert({
+      doctor_id: user.id, patient_id: searchResult.id, otp_code: otp, expires_at: expiresAt,
+    }).select().single();
     setOtpCode(otp);
+    setOtpRequestId(otpData?.id);
     setOtpSent(true);
     setLoading(false);
-    alert(`OTP sent! For testing, OTP is: ${otp}\n\nShare this with patient: ${searchResult.email}`);
   }
 
   async function verifyOTP() {
-    if (otpInput === otpCode) {
+    // Check if patient approved this OTP
+    const { data: otpData } = await supabase.from("otp_requests").select("*").eq("id", otpRequestId).single();
+    
+    if (otpData?.patient_approved) {
       setAccessGranted(true);
       setOtpError("");
-      // Fetch all prescriptions of this patient
-      const { data } = await supabase
-        .from("prescriptions")
-        .select(`*, prescription_medicines(*), doctor:doctor_id(name, specialization)`)
-        .eq("patient_id", searchResult.id)
-        .order("date", { ascending: false });
+      const { data } = await supabase.from("prescriptions").select(`*, prescription_medicines(*), doctor:doctor_id(name, specialization)`).eq("patient_id", searchResult.id).order("date", { ascending: false });
+      setPatientPrescriptions(data || []);
+    } else if (otpInput === otpCode) {
+      setAccessGranted(true);
+      setOtpError("");
+      const { data } = await supabase.from("prescriptions").select(`*, prescription_medicines(*), doctor:doctor_id(name, specialization)`).eq("patient_id", searchResult.id).order("date", { ascending: false });
       setPatientPrescriptions(data || []);
     } else {
-      setOtpError("Invalid OTP! Please try again.");
+      setOtpError("Invalid OTP or patient hasn't approved yet. Try again.");
     }
   }
 
   async function savePrescription(rxData) {
-    const { data: rx, error } = await supabase
-      .from("prescriptions")
-      .insert({ diagnosis: rxData.diagnosis, notes: rxData.notes, doctor_id: user.id, patient_id: searchResult.id })
-      .select().single();
+    const { data: rx, error } = await supabase.from("prescriptions").insert({ diagnosis: rxData.diagnosis, notes: rxData.notes, doctor_id: user.id, patient_id: searchResult.id }).select().single();
     if (error) { alert("Error saving prescription!"); return; }
-    await supabase.from("prescription_medicines").insert(
-      rxData.medicines.map(m => ({ medicine_name: m.name, dosage: m.dosage, frequency: m.frequency, duration: m.duration, prescription_id: rx.id }))
-    );
+    await supabase.from("prescription_medicines").insert(rxData.medicines.map(m => ({ medicine_name: m.name, dosage: m.dosage, frequency: m.frequency, duration: m.duration, prescription_id: rx.id })));
     setShowRxForm(false);
     fetchMyPrescriptions();
-    // Refresh patient prescriptions
     const { data } = await supabase.from("prescriptions").select(`*, prescription_medicines(*), doctor:doctor_id(name, specialization)`).eq("patient_id", searchResult.id).order("date", { ascending: false });
     setPatientPrescriptions(data || []);
     alert("Prescription saved!");
@@ -264,7 +254,7 @@ function DoctorDashboard({ user, onLogout }) {
     setSearchId(""); setSearchResult(null); setOtpSent(false);
     setOtpCode(""); setOtpInput(""); setOtpError("");
     setAccessGranted(false); setPatientPrescriptions([]);
-    setShowRxForm(false);
+    setShowRxForm(false); setOtpRequestId(null);
   }
 
   return (
@@ -276,7 +266,6 @@ function DoctorDashboard({ user, onLogout }) {
         <div>
           <h2 style={headingStyle}>Find Patient</h2>
 
-          {/* Step 1 - Search */}
           {!searchResult && (
             <div style={{ ...s.card, padding: 20, marginBottom: 20 }}>
               <div style={{ fontWeight: 700, color: C.primary, marginBottom: 8 }}>Step 1: Enter Patient Unique ID</div>
@@ -288,39 +277,38 @@ function DoctorDashboard({ user, onLogout }) {
             </div>
           )}
 
-          {/* Step 2 - Patient Found, Send OTP */}
           {searchResult && !otpSent && (
             <div style={{ ...s.card, padding: 20, marginBottom: 20 }}>
               <div style={{ fontWeight: 700, color: C.primary, marginBottom: 12 }}>Step 2: Patient Found</div>
               <div style={{ padding: 16, background: C.accentLight, borderRadius: 12, marginBottom: 16 }}>
                 <div style={{ fontWeight: 700, fontSize: 16 }}>{searchResult.name}</div>
                 <div style={{ color: C.muted, fontSize: 13 }}>{searchResult.unique_id} • Age {searchResult.age} • {searchResult.blood_group}</div>
-                <div style={{ color: C.muted, fontSize: 13 }}>{searchResult.email}</div>
               </div>
               <div style={{ display: "flex", gap: 10 }}>
                 <button onClick={resetSearch} style={{ ...s.btn("ghost"), flex: 1 }}>← Back</button>
                 <button onClick={sendOTP} disabled={loading} style={{ ...s.btn("primary"), flex: 2 }}>
-                  {loading ? "Sending..." : "📧 Send OTP to Patient"}
+                  {loading ? "Sending..." : "📲 Send Access Request to Patient"}
                 </button>
               </div>
             </div>
           )}
 
-          {/* Step 3 - Verify OTP */}
           {searchResult && otpSent && !accessGranted && (
             <div style={{ ...s.card, padding: 20, marginBottom: 20 }}>
-              <div style={{ fontWeight: 700, color: C.primary, marginBottom: 12 }}>Step 3: Enter OTP</div>
-              <p style={{ color: C.muted, fontSize: 13, marginBottom: 16 }}>OTP sent to patient's email. Ask patient to share the OTP with you.</p>
-              <Field label="Enter OTP" value={otpInput} onChange={setOtpInput} placeholder="6-digit OTP" />
+              <div style={{ fontWeight: 700, color: C.primary, marginBottom: 12 }}>Step 3: Waiting for Patient Approval</div>
+              <div style={{ padding: 16, background: C.warningLight, borderRadius: 12, marginBottom: 16, border: `1px solid ${C.warning}44` }}>
+                <div style={{ fontWeight: 700, color: C.warning, marginBottom: 4 }}>⏳ Request Sent!</div>
+                <p style={{ color: C.muted, fontSize: 13, margin: 0 }}>Patient ke app mein OTP request gayi hai. Patient OTP approve karega aur tumhe batayega.</p>
+              </div>
+              <Field label="Patient ne OTP bataya? Enter karo:" value={otpInput} onChange={setOtpInput} placeholder="6-digit OTP" />
               {otpError && <p style={{ color: C.danger, fontSize: 13, marginBottom: 10 }}>{otpError}</p>}
               <div style={{ display: "flex", gap: 10 }}>
                 <button onClick={resetSearch} style={{ ...s.btn("ghost"), flex: 1 }}>← Back</button>
-                <button onClick={verifyOTP} style={{ ...s.btn("primary"), flex: 2 }}>✓ Verify OTP</button>
+                <button onClick={verifyOTP} style={{ ...s.btn("primary"), flex: 2 }}>✓ Verify & Get Access</button>
               </div>
             </div>
           )}
 
-          {/* Step 4 - Access Granted */}
           {searchResult && accessGranted && (
             <div>
               <div style={{ ...s.card, padding: 16, marginBottom: 20, background: C.accentLight, border: `1px solid ${C.accent}44` }}>
@@ -335,10 +323,7 @@ function DoctorDashboard({ user, onLogout }) {
                   </div>
                 </div>
               </div>
-
-              <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, color: C.text }}>
-                All Prescriptions ({patientPrescriptions.length})
-              </h3>
+              <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>All Prescriptions ({patientPrescriptions.length})</h3>
               {patientPrescriptions.length === 0 ? <Empty text="No prescriptions yet." /> :
                 patientPrescriptions.map(rx => <RxCard key={rx.id} rx={rx} showDoctor doctor={rx.doctor} />)}
             </div>
@@ -362,15 +347,91 @@ function DoctorDashboard({ user, onLogout }) {
 }
 
 function PatientDashboard({ user, onLogout }) {
-  const [tab, setTab] = useState("prescriptions");
+  const [tab, setTab] = useState("requests");
   const [prescriptions, setPrescriptions] = useState([]);
+  const [pendingRequests, setPendingRequests] = useState([]);
 
   useEffect(() => {
-    supabase.from("prescriptions").select(`*, prescription_medicines(*), doctor:doctor_id(name, specialization)`).eq("patient_id", user.id).order("date", { ascending: false }).then(({ data }) => setPrescriptions(data || []));
+    fetchPrescriptions();
+    fetchPendingRequests();
+    // Poll every 10 seconds for new requests
+    const interval = setInterval(fetchPendingRequests, 10000);
+    return () => clearInterval(interval);
   }, []);
 
+  async function fetchPrescriptions() {
+    const { data } = await supabase.from("prescriptions").select(`*, prescription_medicines(*), doctor:doctor_id(name, specialization)`).eq("patient_id", user.id).order("date", { ascending: false });
+    setPrescriptions(data || []);
+  }
+
+  async function fetchPendingRequests() {
+    const { data } = await supabase
+      .from("otp_requests")
+      .select(`*, doctor:doctor_id(name, specialization)`)
+      .eq("patient_id", user.id)
+      .eq("used", false)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false });
+    setPendingRequests(data || []);
+  }
+
+  async function approveRequest(request) {
+    await supabase.from("otp_requests").update({ patient_approved: true, used: true }).eq("id", request.id);
+    alert(`OTP approved! Share this OTP with Dr. ${request.doctor?.name}: ${request.otp_code}`);
+    fetchPendingRequests();
+  }
+
+  async function rejectRequest(requestId) {
+    await supabase.from("otp_requests").update({ used: true }).eq("id", requestId);
+    fetchPendingRequests();
+  }
+
   return (
-    <Layout user={user} onLogout={onLogout} role="patient" tabs={[["prescriptions", "📋 Prescriptions"], ["profile", "👤 Profile"]]} activeTab={tab} onTabChange={setTab} subtitle={`ID: ${user.unique_id}`}>
+    <Layout user={user} onLogout={onLogout} role="patient"
+      tabs={[
+        ["requests", `🔔 Requests${pendingRequests.length ? ` (${pendingRequests.length})` : ""}`],
+        ["prescriptions", "📋 Prescriptions"],
+        ["profile", "👤 Profile"]
+      ]}
+      activeTab={tab} onTabChange={setTab} subtitle={`ID: ${user.unique_id}`}
+    >
+      {tab === "requests" && (
+        <div>
+          <h2 style={headingStyle}>Doctor Access Requests</h2>
+          {pendingRequests.length === 0 ? (
+            <div>
+              <Empty text="No pending requests." />
+              <p style={{ textAlign: "center", color: C.muted, fontSize: 13 }}>Jab koi doctor tumhara data access karna chahega — yahan dikhega!</p>
+            </div>
+          ) : (
+            pendingRequests.map(req => (
+              <div key={req.id} style={{ ...s.card, padding: 20, marginBottom: 14, borderLeft: `4px solid ${C.warning}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>
+                      👨‍⚕️ Dr. {req.doctor?.name}
+                    </div>
+                    <div style={{ color: C.muted, fontSize: 13, marginBottom: 4 }}>
+                      {req.doctor?.specialization}
+                    </div>
+                    <div style={{ color: C.muted, fontSize: 12 }}>
+                      Request time: {new Date(req.created_at).toLocaleTimeString()}
+                    </div>
+                    <div style={{ marginTop: 8, padding: "6px 12px", background: C.warningLight, borderRadius: 8, fontSize: 13, color: C.warning, fontWeight: 600 }}>
+                      ⚠️ Ye doctor tumhari saari prescriptions dekhna chahta hai
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                  <button onClick={() => rejectRequest(req.id)} style={{ ...s.btn("danger"), flex: 1 }}>✕ Reject</button>
+                  <button onClick={() => approveRequest(req)} style={{ ...s.btn("accent"), flex: 2 }}>✓ Approve & Show OTP</button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
       {tab === "prescriptions" && (
         <div>
           <h2 style={headingStyle}>My Prescriptions ({prescriptions.length})</h2>
@@ -378,6 +439,7 @@ function PatientDashboard({ user, onLogout }) {
             prescriptions.map(rx => <RxCard key={rx.id} rx={rx} showDoctor doctor={rx.doctor} />)}
         </div>
       )}
+
       {tab === "profile" && (
         <div>
           <h2 style={headingStyle}>My Profile</h2>
