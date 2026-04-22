@@ -327,6 +327,23 @@ function DoctorDashboard({ user, onLogout }) {
     const { data: rx, error } = await supabase.from("prescriptions").insert({ diagnosis: rxData.diagnosis, notes: rxData.notes, doctor_id: user.id, patient_id: searchResult.id }).select().single();
     if (error) { alert("Error saving prescription!"); return; }
     await supabase.from("prescription_medicines").insert(rxData.medicines.map(m => ({ medicine_name: m.name, dosage: m.dosage, frequency: m.frequency, duration: m.duration, prescription_id: rx.id })));
+    
+    // Save vitals if provided
+    if (rxData.vitals) {
+      const v = rxData.vitals;
+      const vitalsData = {
+        patient_id: searchResult.id, doctor_id: user.id, prescription_id: rx.id,
+        bp_systolic: v.bp_systolic ? parseInt(v.bp_systolic) : null,
+        bp_diastolic: v.bp_diastolic ? parseInt(v.bp_diastolic) : null,
+        sugar_fasting: v.sugar_fasting ? parseInt(v.sugar_fasting) : null,
+        sugar_pp: v.sugar_pp ? parseInt(v.sugar_pp) : null,
+        cholesterol: v.cholesterol ? parseInt(v.cholesterol) : null,
+        weight: v.weight ? parseFloat(v.weight) : null,
+        temperature: v.temperature ? parseFloat(v.temperature) : null,
+      };
+      await supabase.from("vitals").insert(vitalsData);
+    }
+
     setShowRxForm(false); fetchMyPrescriptions();
     const { data } = await supabase.from("prescriptions").select(`*, prescription_medicines(*), doctor:doctor_id(name, specialization)`).eq("patient_id", searchResult.id).order("date", { ascending: false });
     setPatientPrescriptions(data || []);
@@ -424,10 +441,12 @@ function PatientDashboard({ user, onLogout }) {
   const [tab, setTab] = useState("requests");
   const [prescriptions, setPrescriptions] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
+  const [vitals, setVitals] = useState([]);
 
   useEffect(() => {
     fetchPrescriptions();
     fetchPendingRequests();
+    fetchVitals();
     const interval = setInterval(fetchPendingRequests, 10000);
     return () => clearInterval(interval);
   }, []);
@@ -435,6 +454,11 @@ function PatientDashboard({ user, onLogout }) {
   async function fetchPrescriptions() {
     const { data } = await supabase.from("prescriptions").select(`*, prescription_medicines(*), doctor:doctor_id(name, specialization)`).eq("patient_id", user.id).order("date", { ascending: false });
     setPrescriptions(data || []);
+  }
+
+  async function fetchVitals() {
+    const { data } = await supabase.from("vitals").select(`*, doctor:doctor_id(name)`).eq("patient_id", user.id).order("recorded_at", { ascending: false });
+    setVitals(data || []);
   }
 
   async function fetchPendingRequests() {
@@ -455,7 +479,7 @@ function PatientDashboard({ user, onLogout }) {
 
   return (
     <Layout user={user} onLogout={onLogout} role="patient"
-      tabs={[["requests", `🔔 Requests${pendingRequests.length ? ` (${pendingRequests.length})` : ""}`], ["prescriptions", "📋 Prescriptions"], ["profile", "👤 Profile"]]}
+      tabs={[["requests", `🔔 Requests${pendingRequests.length ? ` (${pendingRequests.length})` : ""}`], ["prescriptions", "📋 Prescriptions"], ["vitals", "📊 My Vitals"], ["profile", "👤 Profile"]]}
       activeTab={tab} onTabChange={setTab} subtitle={`ID: ${user.unique_id}`}
     >
       {tab === "requests" && (
@@ -477,6 +501,7 @@ function PatientDashboard({ user, onLogout }) {
           ))}
         </div>
       )}
+
       {tab === "prescriptions" && (
         <div>
           <h2 style={headingStyle}>My Prescriptions ({prescriptions.length})</h2>
@@ -484,6 +509,49 @@ function PatientDashboard({ user, onLogout }) {
             prescriptions.map(rx => <RxCard key={rx.id} rx={rx} showDoctor doctor={rx.doctor} />)}
         </div>
       )}
+
+      {tab === "vitals" && (
+        <div>
+          <h2 style={headingStyle}>My Vitals History</h2>
+          {vitals.length === 0 ? (
+            <div>
+              <Empty text="No vitals recorded yet." />
+              <p style={{ textAlign: "center", color: C.muted, fontSize: 13 }}>Doctor prescription likhte waqt tumhare vitals record karega!</p>
+            </div>
+          ) : (
+            <div>
+              {/* Summary Cards */}
+              {vitals.length > 0 && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 24 }}>
+                  {vitals[0].bp_systolic && <VitalSummaryCard icon="🫀" label="Latest BP" value={`${vitals[0].bp_systolic}/${vitals[0].bp_diastolic}`} unit="mmHg" color={C.danger} />}
+                  {vitals[0].sugar_fasting && <VitalSummaryCard icon="🍬" label="Sugar (F)" value={vitals[0].sugar_fasting} unit="mg/dL" color={C.warning} />}
+                  {vitals[0].cholesterol && <VitalSummaryCard icon="🧪" label="Cholesterol" value={vitals[0].cholesterol} unit="mg/dL" color={C.purple} />}
+                  {vitals[0].weight && <VitalSummaryCard icon="⚖️" label="Weight" value={vitals[0].weight} unit="kg" color={C.primary} />}
+                </div>
+              )}
+
+              {/* Vitals History */}
+              {vitals.map((v, i) => (
+                <div key={v.id} style={{ ...s.card, padding: 16, marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                    <div style={{ fontWeight: 600, color: C.primary }}>📅 {new Date(v.recorded_at).toLocaleDateString()}</div>
+                    <div style={{ color: C.muted, fontSize: 12 }}>Dr. {v.doctor?.name}</div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {v.bp_systolic && <VitalItem icon="🫀" label="BP" value={`${v.bp_systolic}/${v.bp_diastolic} mmHg`} />}
+                    {v.sugar_fasting && <VitalItem icon="🍬" label="Sugar (F)" value={`${v.sugar_fasting} mg/dL`} />}
+                    {v.sugar_pp && <VitalItem icon="🍬" label="Sugar (PP)" value={`${v.sugar_pp} mg/dL`} />}
+                    {v.cholesterol && <VitalItem icon="🧪" label="Cholesterol" value={`${v.cholesterol} mg/dL`} />}
+                    {v.weight && <VitalItem icon="⚖️" label="Weight" value={`${v.weight} kg`} />}
+                    {v.temperature && <VitalItem icon="🌡️" label="Temp" value={`${v.temperature} °F`} />}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {tab === "profile" && (
         <div>
           <h2 style={headingStyle}>My Profile</h2>
@@ -501,6 +569,26 @@ function PatientDashboard({ user, onLogout }) {
         </div>
       )}
     </Layout>
+  );
+}
+
+function VitalSummaryCard({ icon, label, value, unit, color }) {
+  return (
+    <div style={{ ...s.card, padding: 14, textAlign: "center", borderTop: `3px solid ${color}` }}>
+      <div style={{ fontSize: 24, marginBottom: 6 }}>{icon}</div>
+      <div style={{ fontSize: 18, fontWeight: 800, color }}>{value}</div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{unit}</div>
+      <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{label}</div>
+    </div>
+  );
+}
+
+function VitalItem({ icon, label, value }) {
+  return (
+    <div style={{ padding: "8px 12px", background: C.bg, borderRadius: 8, fontSize: 13 }}>
+      <span style={{ color: C.muted }}>{icon} {label}: </span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
@@ -555,6 +643,8 @@ function PrescriptionForm({ patient, onSave, onCancel }) {
   const [diagnosis, setDiagnosis] = useState("");
   const [notes, setNotes] = useState("");
   const [medicines, setMedicines] = useState([{ name: "", dosage: "", frequency: "", duration: "" }]);
+  const [vitals, setVitals] = useState({ bp_systolic: "", bp_diastolic: "", sugar_fasting: "", sugar_pp: "", cholesterol: "", weight: "", temperature: "" });
+  const [showVitals, setShowVitals] = useState(false);
 
   return (
     <div>
@@ -567,7 +657,34 @@ function PrescriptionForm({ patient, onSave, onCancel }) {
         <div style={{ fontWeight: 700, fontSize: 16 }}>{patient.name}</div>
         <div style={{ color: C.muted, fontSize: 13 }}>{patient.unique_id} • Age {patient.age} • {patient.blood_group}</div>
       </div>
+
       <Field label="Diagnosis" value={diagnosis} onChange={setDiagnosis} placeholder="e.g. Hypertension" />
+
+      {/* VITALS SECTION */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <label style={s.label}>📊 Vitals (Optional)</label>
+          <button onClick={() => setShowVitals(v => !v)} style={{ ...s.btn("ghost"), padding: "6px 14px", fontSize: 12, border: `1px solid ${C.border}` }}>
+            {showVitals ? "Hide Vitals" : "Add Vitals"}
+          </button>
+        </div>
+        {showVitals && (
+          <div style={{ ...s.card, padding: 16, background: "#F8FDFF", border: `1px solid ${C.primary}22` }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <Field label="BP Systolic (mmHg)" value={vitals.bp_systolic} onChange={v => setVitals(p => ({ ...p, bp_systolic: v }))} placeholder="120" type="number" noMargin />
+              <Field label="BP Diastolic (mmHg)" value={vitals.bp_diastolic} onChange={v => setVitals(p => ({ ...p, bp_diastolic: v }))} placeholder="80" type="number" noMargin />
+              <Field label="Sugar Fasting (mg/dL)" value={vitals.sugar_fasting} onChange={v => setVitals(p => ({ ...p, sugar_fasting: v }))} placeholder="100" type="number" noMargin />
+              <Field label="Sugar PP (mg/dL)" value={vitals.sugar_pp} onChange={v => setVitals(p => ({ ...p, sugar_pp: v }))} placeholder="140" type="number" noMargin />
+              <Field label="Cholesterol (mg/dL)" value={vitals.cholesterol} onChange={v => setVitals(p => ({ ...p, cholesterol: v }))} placeholder="200" type="number" noMargin />
+              <Field label="Weight (kg)" value={vitals.weight} onChange={v => setVitals(p => ({ ...p, weight: v }))} placeholder="70" type="number" noMargin />
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <Field label="Temperature (°F)" value={vitals.temperature} onChange={v => setVitals(p => ({ ...p, temperature: v }))} placeholder="98.6" type="number" noMargin />
+            </div>
+          </div>
+        )}
+      </div>
+
       <div style={{ marginBottom: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <label style={s.label}>Medicines</label>
@@ -591,7 +708,11 @@ function PrescriptionForm({ patient, onSave, onCancel }) {
       <Field label="Notes (optional)" value={notes} onChange={setNotes} placeholder="Additional advice..." textarea />
       <div style={{ display: "flex", gap: 10 }}>
         <button onClick={onCancel} style={{ ...s.btn("ghost"), flex: 1 }}>Cancel</button>
-        <button onClick={() => { if (!diagnosis.trim()) return alert("Please enter diagnosis."); if (medicines.some(m => !m.name.trim())) return alert("Fill all medicine names."); onSave({ diagnosis, notes, medicines }); }} style={{ ...s.btn("primary"), flex: 2 }}>💾 Save Prescription</button>
+        <button onClick={() => {
+          if (!diagnosis.trim()) return alert("Please enter diagnosis.");
+          if (medicines.some(m => !m.name.trim())) return alert("Fill all medicine names.");
+          onSave({ diagnosis, notes, medicines, vitals: showVitals ? vitals : null });
+        }} style={{ ...s.btn("primary"), flex: 2 }}>💾 Save Prescription</button>
       </div>
     </div>
   );
