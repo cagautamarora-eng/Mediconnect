@@ -495,7 +495,8 @@ function PatientDashboard({ user, onLogout }) {
   const [doctors, setDoctors] = useState([]);
   const [searchSpec, setSearchSpec] = useState("");
 
-  useEffect(() => {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+useEffect(() => {
     fetchPrescriptions();
     fetchPendingRequests();
     fetchVitals();
