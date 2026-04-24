@@ -166,7 +166,7 @@ function AuthScreen({ onLogin }) {
       if (profileError) throw profileError;
       setScreen("home");
       setSelectedRole(null);
-      setForm({ name: "", email: "", password: "", specialization: "", age: "", bloodGroup: "", storeName: "", address: "", licenseNo: "" });
+      setForm({ name: "", email: localStorage.getItem('mc_email') || "", password: localStorage.getItem('mc_password') || "", specialization: "", age: "", bloodGroup: "", storeName: "", address: "", licenseNo: "" });
       alert("Registration successful! Please wait for admin approval.");
     } catch (err) { setError(err.message); }
     setLoading(false);
