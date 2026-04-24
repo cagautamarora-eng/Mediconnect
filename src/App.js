@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import supabase from "./supabase";
 import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import 'jspdf-autotable';
 
 function uid() { return Math.random().toString(36).slice(2, 9).toUpperCase(); }
 function generateOTP() { return Math.floor(100000 + Math.random() * 900000).toString(); }
@@ -32,7 +32,7 @@ function downloadPDF(rx, doctor, patient) {
   doc.text(`Diagnosis: ${rx.diagnosis}`, 20, 96);
   const medicines = rx.prescription_medicines || [];
   if (medicines.length > 0) {
-    autoTable(doc, {
+    doc.autoTable({
       startY: 104,
       head: [["Medicine", "Dosage", "Frequency", "Duration"]],
       body: medicines.map(m => [m.medicine_name, m.dosage || "", m.frequency || "", m.duration || ""]),
@@ -490,14 +490,22 @@ function PatientDashboard({ user, onLogout }) {
   const [prescriptions, setPrescriptions] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
   const [vitals, setVitals] = useState([]);
+  const [doctors, setDoctors] = useState([]);
+  const [searchSpec, setSearchSpec] = useState("");
 
   useEffect(() => {
     fetchPrescriptions();
     fetchPendingRequests();
     fetchVitals();
+    fetchDoctors();
     const interval = setInterval(fetchPendingRequests, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  async function fetchDoctors() {
+    const { data } = await supabase.from("users").select("*").eq("role", "doctor").eq("approved", true).order("name");
+    setDoctors(data || []);
+  }
 
   async function fetchPrescriptions() {
     const { data } = await supabase.from("prescriptions").select(`*, prescription_medicines(*), doctor:doctor_id(name, specialization)`).eq("patient_id", user.id).order("date", { ascending: false });
@@ -527,7 +535,7 @@ function PatientDashboard({ user, onLogout }) {
 
   return (
     <Layout user={user} onLogout={onLogout} role="patient"
-      tabs={[["requests", `🔔 Requests${pendingRequests.length ? ` (${pendingRequests.length})` : ""}`], ["prescriptions", "📋 Prescriptions"], ["vitals", "📊 My Vitals"], ["profile", "👤 Profile"]]}
+      tabs={[["requests", `🔔 Requests${pendingRequests.length ? ` (${pendingRequests.length})` : ""}`], ["prescriptions", "📋 Prescriptions"], ["vitals", "📊 My Vitals"], ["doctors", "👨‍⚕️ Doctors"], ["profile", "👤 Profile"]]}
       activeTab={tab} onTabChange={setTab} subtitle={`ID: ${user.unique_id}`}
     >
       {tab === "requests" && (
@@ -597,6 +605,55 @@ function PatientDashboard({ user, onLogout }) {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {tab === "doctors" && (
+        <div>
+          <h2 style={headingStyle}>Find a Doctor</h2>
+          <div style={{ marginBottom: 20 }}>
+            <input
+              value={searchSpec}
+              onChange={e => setSearchSpec(e.target.value)}
+              placeholder="Search by name or specialization..."
+              style={{ ...s.input }}
+            />
+          </div>
+          {/* Specialty groups */}
+          {(() => {
+            const filtered = doctors.filter(d =>
+              d.name.toLowerCase().includes(searchSpec.toLowerCase()) ||
+              (d.specialization || "").toLowerCase().includes(searchSpec.toLowerCase())
+            );
+            if (filtered.length === 0) return <Empty text="No doctors found." />;
+            
+            // Group by specialization
+            const groups = {};
+            filtered.forEach(d => {
+              const spec = d.specialization || "General";
+              if (!groups[spec]) groups[spec] = [];
+              groups[spec].push(d);
+            });
+
+            return Object.entries(groups).map(([spec, docs]) => (
+              <div key={spec} style={{ marginBottom: 24 }}>
+                <h3 style={{ fontSize: 13, color: C.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 }}>
+                  🩺 {spec}
+                </h3>
+                {docs.map(d => (
+                  <div key={d.id} style={{ ...s.card, padding: 16, marginBottom: 10, display: "flex", alignItems: "center", gap: 14 }}>
+                    <div style={{ width: 48, height: 48, borderRadius: 12, background: C.primaryLight, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>👨‍⚕️</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>Dr. {d.name}</div>
+                      <div style={{ color: C.muted, fontSize: 13 }}>{d.specialization || "General Physician"}</div>
+                      <div style={{ marginTop: 4 }}><span style={s.badge(C.accent)}>Available on MediConnect</span></div>
+                    </div>
+                    <div style={{ fontSize: 12, color: C.primary, fontWeight: 600 }}>ID: {d.unique_id}</div>
+                  </div>
+                ))}
+              </div>
+            ));
+          })()}
         </div>
       )}
 
