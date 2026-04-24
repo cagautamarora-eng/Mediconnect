@@ -133,7 +133,8 @@ function AuthScreen({ onLogin }) {
       const { data: profile } = await supabase.from("users").select("*").eq("id", data.user.id).single();
       if (!profile) throw new Error("Profile not found.");
       if (!profile.approved && profile.role !== "admin") throw new Error("Account pending admin approval.");
-      onLogin(profile);
+      localStorage.setItem('mc_email', form.email);
+localStorage.setItem('mc_password', form.password);
     } catch (err) { setError(err.message); }
     setLoading(false);
   }
@@ -329,7 +330,8 @@ function DoctorDashboard({ user, onLogout }) {
   const [loading, setLoading] = useState(false);
   const [otpRequestId, setOtpRequestId] = useState(null);
 
-  useEffect(() => { fetchMyPrescriptions(); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+useEffect(() => { fetchMyPrescriptions(); }, []);
 
   async function fetchMyPrescriptions() {
     const { data } = await supabase.from("prescriptions").select(`*, prescription_medicines(*), patient:patient_id(name, unique_id, age, blood_group)`).eq("doctor_id", user.id).order("date", { ascending: false });
