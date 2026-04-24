@@ -750,6 +750,13 @@ function PrescriptionForm({ patient, onSave, onCancel }) {
   const [medicines, setMedicines] = useState([{ name: "", dosage: "", frequency: "", duration: "" }]);
   const [vitals, setVitals] = useState({ bp_systolic: "", bp_diastolic: "", sugar_fasting: "", sugar_pp: "", cholesterol: "", weight: "", temperature: "" });
   const [showVitals, setShowVitals] = useState(false);
+  const [medSuggestions, setMedSuggestions] = useState({});
+
+  async function searchMedicines(query, index) {
+    if (!query || query.length < 2) { setMedSuggestions(p => ({ ...p, [index]: [] })); return; }
+    const { data } = await supabase.from("medicines").select("name, category").ilike("name", `%${query}%`).limit(6);
+    setMedSuggestions(p => ({ ...p, [index]: data || [] }));
+  }
 
   return (
     <div>
@@ -802,7 +809,25 @@ function PrescriptionForm({ patient, onSave, onCancel }) {
               {medicines.length > 1 && <button onClick={() => setMedicines(p => p.filter((_, idx) => idx !== i))} style={{ background: "none", border: "none", color: C.danger, cursor: "pointer", fontSize: 16 }}>✕</button>}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <Field label="Name" value={med.name} onChange={v => setMedicines(p => p.map((m, idx) => idx === i ? { ...m, name: v } : m))} placeholder="Medicine name" noMargin />
+              <div style={{ position: "relative" }}>
+                <label style={s.label}>Name</label>
+                <input
+                  value={med.name}
+                  onChange={e => { const v = e.target.value; setMedicines(p => p.map((m, idx) => idx === i ? { ...m, name: v } : m)); searchMedicines(v, i); }}
+                  placeholder="Medicine name"
+                  style={{ ...s.input, marginBottom: 0 }}
+                />
+                {medSuggestions[i] && medSuggestions[i].length > 0 && (
+                  <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 8, zIndex: 100, boxShadow: C.shadow }}>
+                    {medSuggestions[i].map((sug, j) => (
+                      <div key={j} onClick={() => { setMedicines(p => p.map((m, idx) => idx === i ? { ...m, name: sug.name } : m)); setMedSuggestions(p => ({ ...p, [i]: [] })); }} style={{ padding: "8px 12px", cursor: "pointer", fontSize: 13, borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between" }}>
+                        <span>💊 {sug.name}</span>
+                        <span style={{ color: C.muted, fontSize: 11 }}>{sug.category}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <Field label="Dosage" value={med.dosage} onChange={v => setMedicines(p => p.map((m, idx) => idx === i ? { ...m, dosage: v } : m))} placeholder="500mg" noMargin />
               <Field label="Frequency" value={med.frequency} onChange={v => setMedicines(p => p.map((m, idx) => idx === i ? { ...m, frequency: v } : m))} placeholder="2x daily" noMargin />
               <Field label="Duration" value={med.duration} onChange={v => setMedicines(p => p.map((m, idx) => idx === i ? { ...m, duration: v } : m))} placeholder="7 days" noMargin />
