@@ -572,7 +572,55 @@ function PatientDashboard({ user, onLogout }) {
   const [doctors, setDoctors] = useState([]);
   const [searchSpec, setSearchSpec] = useState("");
   const [showSelfReport, setShowSelfReport] = useState(false);
+  const [selfReportMode, setSelfReportMode] = useState("photo");
   const [selfReport, setSelfReport] = useState({ diagnosis: "", doctor_name: "", medicine: "", notes: "" });
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrResult, setOcrResult] = useState("");
+  const [uploadedPhoto, setUploadedPhoto] = useState(null);
+
+  async function handlePhotoUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploadedPhoto(file);
+    setOcrLoading(true);
+    setOcrResult("");
+    try {
+      const base64 = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = () => res(reader.result.split(",")[1]);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": process.env.REACT_APP_CLAUDE_API_KEY, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model: "claude-opus-4-5",
+          max_tokens: 1024,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: file.type, data: base64 } },
+              { type: "text", text: "This is a medical prescription. Please extract: 1) Diagnosis/Disease, 2) Doctor Name, 3) Medicines with dosage, 4) Any notes. Format as simple text." }
+            ]
+          }]
+        })
+      });
+      const data = await response.json();
+      const text = data.content?.[0]?.text || "";
+      setOcrResult(text);
+      // Auto-fill fields from OCR result
+      const diagMatch = text.match(/diagnosis[:\s]+([^\n]+)/i);
+      const docMatch = text.match(/doctor[:\s]+([^\n]+)/i);
+      const medMatch = text.match(/medicine[s]?[:\s]+([^\n]+)/i);
+      if (diagMatch) setSelfReport(p => ({ ...p, diagnosis: diagMatch[1].trim() }));
+      if (docMatch) setSelfReport(p => ({ ...p, doctor_name: docMatch[1].trim() }));
+      if (medMatch) setSelfReport(p => ({ ...p, medicine: medMatch[1].trim() }));
+    } catch (err) {
+      setOcrResult("Error reading prescription. Please fill manually.");
+    }
+    setOcrLoading(false);
+  }
 
   async function saveSelfReport() {
     if (!selfReport.diagnosis.trim()) return alert("Please enter diagnosis.");
@@ -655,20 +703,73 @@ function PatientDashboard({ user, onLogout }) {
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
             <h2 style={{ ...headingStyle, margin: 0 }}>My Prescriptions ({prescriptions.length})</h2>
-            <button onClick={() => setShowSelfReport(true)} style={{ ...s.btn("accent"), fontSize: 12, padding: "8px 14px" }}>+ Self Report</button>
+            <button onClick={() => setShowSelfReport(true)} style={{ ...s.btn("accent"), fontSize: 12, padding: "8px 14px" }}>+ Add Prescription</button>
           </div>
 
           {showSelfReport && (
             <div style={{ ...s.card, padding: 20, marginBottom: 20, border: `2px solid ${C.accent}` }}>
-              <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16, color: C.accent }}>📝 Add Self Reported Prescription</h3>
-              <Field label="Diagnosis" value={selfReport.diagnosis} onChange={v => setSelfReport(p => ({ ...p, diagnosis: v }))} placeholder="e.g. Fever, BP" />
-              <Field label="Doctor Name (optional)" value={selfReport.doctor_name} onChange={v => setSelfReport(p => ({ ...p, doctor_name: v }))} placeholder="e.g. Dr. Sharma" />
-              <Field label="Medicine Name" value={selfReport.medicine} onChange={v => setSelfReport(p => ({ ...p, medicine: v }))} placeholder="e.g. Paracetamol 500mg" />
-              <Field label="Notes (optional)" value={selfReport.notes} onChange={v => setSelfReport(p => ({ ...p, notes: v }))} placeholder="Any additional info..." textarea />
-              <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={() => setShowSelfReport(false)} style={{ ...s.btn("ghost"), flex: 1 }}>Cancel</button>
-                <button onClick={saveSelfReport} style={{ ...s.btn("accent"), flex: 2 }}>💾 Save</button>
+              <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16, color: C.accent }}>📋 Add Prescription</h3>
+              
+              {/* Upload or Manual toggle */}
+              <div style={{ display: "flex", background: C.bg, borderRadius: 10, padding: 4, marginBottom: 20 }}>
+                <button onClick={() => setSelfReportMode("photo")} style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", fontFamily: "inherit", fontSize: 13, cursor: "pointer", background: selfReportMode === "photo" ? C.card : "transparent", color: selfReportMode === "photo" ? C.accent : C.muted, fontWeight: selfReportMode === "photo" ? 700 : 400 }}>📷 Upload Photo</button>
+                <button onClick={() => setSelfReportMode("manual")} style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", fontFamily: "inherit", fontSize: 13, cursor: "pointer", background: selfReportMode === "manual" ? C.card : "transparent", color: selfReportMode === "manual" ? C.accent : C.muted, fontWeight: selfReportMode === "manual" ? 700 : 400 }}>✍️ Manual Entry</button>
               </div>
+
+              {selfReportMode === "photo" && (
+                <div>
+                  <div style={{ border: `2px dashed ${C.accent}`, borderRadius: 12, padding: 24, textAlign: "center", marginBottom: 16, background: C.accentLight }}>
+                    <div style={{ fontSize: 36, marginBottom: 8 }}>📷</div>
+                    <p style={{ color: C.muted, fontSize: 13, marginBottom: 12 }}>Purani prescription ka photo upload karo — AI automatically read karega!</p>
+                    <input type="file" accept="image/*" onChange={handlePhotoUpload} style={{ display: "none" }} id="rxPhotoInput" />
+                    <label htmlFor="rxPhotoInput" style={{ ...s.btn("accent"), cursor: "pointer", padding: "10px 20px" }}>📁 Choose Photo</label>
+                  </div>
+
+                  {ocrLoading && (
+                    <div style={{ textAlign: "center", padding: 16, color: C.primary }}>
+                      <div style={{ fontSize: 24, marginBottom: 8 }}>🤖</div>
+                      <p>AI prescription read kar raha hai...</p>
+                    </div>
+                  )}
+
+                  {ocrResult && (
+                    <div style={{ background: C.primaryLight, borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                      <div style={{ fontWeight: 700, color: C.primary, marginBottom: 8 }}>✅ AI ne ye read kiya:</div>
+                      <pre style={{ fontSize: 12, color: C.text, whiteSpace: "pre-wrap", margin: 0 }}>{ocrResult}</pre>
+                    </div>
+                  )}
+
+                  {uploadedPhoto && !ocrLoading && (
+                    <div>
+                      <Field label="Diagnosis (confirm karo)" value={selfReport.diagnosis} onChange={v => setSelfReport(p => ({ ...p, diagnosis: v }))} placeholder="e.g. Fever, BP" />
+                      <Field label="Doctor Name" value={selfReport.doctor_name} onChange={v => setSelfReport(p => ({ ...p, doctor_name: v }))} placeholder="e.g. Dr. Sharma" />
+                      <Field label="Medicine" value={selfReport.medicine} onChange={v => setSelfReport(p => ({ ...p, medicine: v }))} placeholder="e.g. Paracetamol 500mg" />
+                      <Field label="Notes" value={selfReport.notes} onChange={v => setSelfReport(p => ({ ...p, notes: v }))} placeholder="Additional info..." textarea />
+                      <div style={{ display: "flex", gap: 10 }}>
+                        <button onClick={() => { setShowSelfReport(false); setUploadedPhoto(null); setOcrResult(""); }} style={{ ...s.btn("ghost"), flex: 1 }}>Cancel</button>
+                        <button onClick={saveSelfReport} style={{ ...s.btn("accent"), flex: 2 }}>💾 Save Prescription</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {!uploadedPhoto && !ocrLoading && (
+                    <button onClick={() => { setShowSelfReport(false); }} style={{ ...s.btn("ghost"), width: "100%" }}>Cancel</button>
+                  )}
+                </div>
+              )}
+
+              {selfReportMode === "manual" && (
+                <div>
+                  <Field label="Diagnosis" value={selfReport.diagnosis} onChange={v => setSelfReport(p => ({ ...p, diagnosis: v }))} placeholder="e.g. Fever, BP" />
+                  <Field label="Doctor Name (optional)" value={selfReport.doctor_name} onChange={v => setSelfReport(p => ({ ...p, doctor_name: v }))} placeholder="e.g. Dr. Sharma" />
+                  <Field label="Medicine Name" value={selfReport.medicine} onChange={v => setSelfReport(p => ({ ...p, medicine: v }))} placeholder="e.g. Paracetamol 500mg" />
+                  <Field label="Notes (optional)" value={selfReport.notes} onChange={v => setSelfReport(p => ({ ...p, notes: v }))} placeholder="Any additional info..." textarea />
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button onClick={() => setShowSelfReport(false)} style={{ ...s.btn("ghost"), flex: 1 }}>Cancel</button>
+                    <button onClick={saveSelfReport} style={{ ...s.btn("accent"), flex: 2 }}>💾 Save</button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
