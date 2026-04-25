@@ -571,6 +571,20 @@ function PatientDashboard({ user, onLogout }) {
   const [vitals, setVitals] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [searchSpec, setSearchSpec] = useState("");
+  const [showSelfReport, setShowSelfReport] = useState(false);
+  const [selfReport, setSelfReport] = useState({ diagnosis: "", doctor_name: "", medicine: "", notes: "" });
+
+  async function saveSelfReport() {
+    if (!selfReport.diagnosis.trim()) return alert("Please enter diagnosis.");
+    const { data: rx } = await supabase.from("prescriptions").insert({ diagnosis: selfReport.diagnosis, notes: selfReport.notes, patient_id: user.id, is_self_reported: true, reported_doctor_name: selfReport.doctor_name || null }).select().single();
+    if (rx && selfReport.medicine) {
+      await supabase.from("prescription_medicines").insert({ prescription_id: rx.id, medicine_name: selfReport.medicine, dosage: "", frequency: "", duration: "" });
+    }
+    setSelfReport({ diagnosis: "", doctor_name: "", medicine: "", notes: "" });
+    setShowSelfReport(false);
+    fetchPrescriptions();
+    alert("Self reported prescription saved!");
+  }
 
   useEffect(() => {
     fetchPrescriptions();
@@ -639,9 +653,27 @@ function PatientDashboard({ user, onLogout }) {
 
       {tab === "prescriptions" && (
         <div>
-          <h2 style={headingStyle}>My Prescriptions ({prescriptions.length})</h2>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+            <h2 style={{ ...headingStyle, margin: 0 }}>My Prescriptions ({prescriptions.length})</h2>
+            <button onClick={() => setShowSelfReport(true)} style={{ ...s.btn("accent"), fontSize: 12, padding: "8px 14px" }}>+ Self Report</button>
+          </div>
+
+          {showSelfReport && (
+            <div style={{ ...s.card, padding: 20, marginBottom: 20, border: `2px solid ${C.accent}` }}>
+              <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16, color: C.accent }}>📝 Add Self Reported Prescription</h3>
+              <Field label="Diagnosis" value={selfReport.diagnosis} onChange={v => setSelfReport(p => ({ ...p, diagnosis: v }))} placeholder="e.g. Fever, BP" />
+              <Field label="Doctor Name (optional)" value={selfReport.doctor_name} onChange={v => setSelfReport(p => ({ ...p, doctor_name: v }))} placeholder="e.g. Dr. Sharma" />
+              <Field label="Medicine Name" value={selfReport.medicine} onChange={v => setSelfReport(p => ({ ...p, medicine: v }))} placeholder="e.g. Paracetamol 500mg" />
+              <Field label="Notes (optional)" value={selfReport.notes} onChange={v => setSelfReport(p => ({ ...p, notes: v }))} placeholder="Any additional info..." textarea />
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setShowSelfReport(false)} style={{ ...s.btn("ghost"), flex: 1 }}>Cancel</button>
+                <button onClick={saveSelfReport} style={{ ...s.btn("accent"), flex: 2 }}>💾 Save</button>
+              </div>
+            </div>
+          )}
+
           {prescriptions.length === 0 ? <Empty text="No prescriptions yet." /> :
-            prescriptions.map(rx => <RxCard key={rx.id} rx={rx} showDoctor doctor={rx.doctor} />)}
+            prescriptions.map(rx => <RxCard key={rx.id} rx={rx} showDoctor doctor={rx.doctor} selfReported={rx.is_self_reported} reportedDoctor={rx.reported_doctor_name} />)}
         </div>
       )}
 
@@ -943,7 +975,7 @@ function PrescriptionForm({ patient, onSave, onCancel }) {
 }
 
 // ─── RX CARD ─────────────────────────────────────────────────────────────────
-function RxCard({ rx, doctor, patient, showDoctor, showPatient }) {
+function RxCard({ rx, doctor, patient, showDoctor, showPatient, selfReported, reportedDoctor }) {
   const [open, setOpen] = useState(false);
   const medicines = rx.prescription_medicines || [];
   return (
@@ -951,7 +983,11 @@ function RxCard({ rx, doctor, patient, showDoctor, showPatient }) {
       <div onClick={() => setOpen(o => !o)} style={{ padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: 15 }}>{rx.diagnosis}</div>
-          <div style={{ color: C.muted, fontSize: 12, marginTop: 2 }}>{showDoctor && doctor && `Dr. ${doctor.name} • `}{showPatient && patient && `${patient.name} • `}{rx.date}</div>
+          <div style={{ color: C.muted, fontSize: 12, marginTop: 2 }}>
+            {selfReported ? <span style={s.badge(C.warning)}>Self Reported</span> : showDoctor && doctor && `Dr. ${doctor.name} • `}
+            {reportedDoctor && ` Dr. ${reportedDoctor} • `}
+            {showPatient && patient && `${patient.name} • `}{rx.date}
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={s.badge(C.primary)}>{medicines.length} med{medicines.length !== 1 ? "s" : ""}</span>
