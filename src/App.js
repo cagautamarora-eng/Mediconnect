@@ -779,8 +779,17 @@ function PrescriptionForm({ patient, onSave, onCancel }) {
 
   async function searchMedicines(query, index) {
     if (!query || query.length < 2) { setMedSuggestions(p => ({ ...p, [index]: [] })); return; }
-    const { data } = await supabase.from("medicines").select("name, category").ilike("name", `%${query}%`).limit(6);
-    setMedSuggestions(p => ({ ...p, [index]: data || [] }));
+    const { data: localData } = await supabase.from("medicines").select("name, category").ilike("name", `%${query}%`).limit(3);
+    try {
+      const res = await fetch(`https://api.fda.gov/drug/label.json?search=openfda.brand_name:"${query}"&limit=5`);
+      const json = await res.json();
+      const fdaMeds = (json.results || []).map(r => ({ name: r.openfda?.brand_name?.[0] || r.openfda?.generic_name?.[0] || query, category: "FDA Approved" }));
+      const combined = [...(localData || []), ...fdaMeds];
+      const unique = combined.filter((v, i, a) => a.findIndex(t => t.name === v.name) === i);
+      setMedSuggestions(p => ({ ...p, [index]: unique.slice(0, 6) }));
+    } catch {
+      setMedSuggestions(p => ({ ...p, [index]: localData || [] }));
+    }
   }
 
   return (
