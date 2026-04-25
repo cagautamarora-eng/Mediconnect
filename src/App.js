@@ -591,31 +591,27 @@ function PatientDashboard({ user, onLogout }) {
         reader.onerror = rej;
         reader.readAsDataURL(file);
       });
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": process.env.REACT_APP_CLAUDE_API_KEY, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({
-          model: "claude-opus-4-5",
-          max_tokens: 1024,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: file.type, data: base64 } },
-              { type: "text", text: "This is a medical prescription. Please extract: 1) Diagnosis/Disease, 2) Doctor Name, 3) Medicines with dosage, 4) Any notes. Format as simple text." }
-            ]
-          }]
-        })
+
+      const { data, error } = await supabase.functions.invoke("ocr-prescription", {
+        body: { imageBase64: base64, mediaType: file.type }
       });
-      const data = await response.json();
-      const text = data.content?.[0]?.text || "";
+
+      if (error) throw error;
+
+      const text = data?.result || "";
       setOcrResult(text);
+
       // Auto-fill fields from OCR result
-      const diagMatch = text.match(/diagnosis[:\s]+([^\n]+)/i);
-      const docMatch = text.match(/doctor[:\s]+([^\n]+)/i);
-      const medMatch = text.match(/medicine[s]?[:\s]+([^\n]+)/i);
+      const diagMatch = text.match(/Diagnosis[:\s]+([^\n]+)/i);
+      const docMatch = text.match(/Doctor[:\s]+([^\n]+)/i);
+      const medMatch = text.match(/Medicines?[:\s]+([^\n]+)/i);
+      const notesMatch = text.match(/Notes?[:\s]+([^\n]+)/i);
+
       if (diagMatch) setSelfReport(p => ({ ...p, diagnosis: diagMatch[1].trim() }));
       if (docMatch) setSelfReport(p => ({ ...p, doctor_name: docMatch[1].trim() }));
       if (medMatch) setSelfReport(p => ({ ...p, medicine: medMatch[1].trim() }));
+      if (notesMatch) setSelfReport(p => ({ ...p, notes: notesMatch[1].trim() }));
+
     } catch (err) {
       setOcrResult("Error reading prescription. Please fill manually.");
     }
