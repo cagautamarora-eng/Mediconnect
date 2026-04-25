@@ -432,7 +432,7 @@ function DoctorDashboard({ user, onLogout }) {
 
   return (
     <Layout user={user} onLogout={onLogout} role="doctor"
-      tabs={[["find", "🔍 Find Patient"], ["myprescriptions", "📋 My Prescriptions"]]}
+      tabs={[["find", "🔍 Find Patient"], ["myprescriptions", "📋 My Prescriptions"], ["myprofile", "👤 My Profile"]]}
       activeTab={tab} onTabChange={(t) => { setTab(t); resetSearch(); }} subtitle={user.specialization}
     >
       {tab === "find" && !showRxForm && (
@@ -505,7 +505,61 @@ function DoctorDashboard({ user, onLogout }) {
             myPrescriptions.map(rx => <RxCard key={rx.id} rx={rx} showPatient patient={rx.patient} />)}
         </div>
       )}
+      {tab === "myprofile" && <DoctorProfileTab user={user} />}
     </Layout>
+  );
+}
+
+// ─── DOCTOR PROFILE TAB ───────────────────────────────────────────────────────
+function DoctorProfileTab({ user }) {
+  const [profile, setProfile] = useState({ bio: user.bio || "", clinic_name: user.clinic_name || "", clinic_address: user.clinic_address || "", experience_years: user.experience_years || "", consultation_fee: user.consultation_fee || "", available_days: user.available_days || "", available_time: user.available_time || "" });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  async function saveProfile() {
+    setSaving(true);
+    await supabase.from("users").update({
+      bio: profile.bio, clinic_name: profile.clinic_name, clinic_address: profile.clinic_address,
+      experience_years: profile.experience_years ? parseInt(profile.experience_years) : null,
+      consultation_fee: profile.consultation_fee ? parseInt(profile.consultation_fee) : null,
+      available_days: profile.available_days, available_time: profile.available_time,
+    }).eq("id", user.id);
+    setSaving(false); setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  return (
+    <div>
+      <h2 style={headingStyle}>My Profile</h2>
+      <div style={{ ...s.card, padding: 20, marginBottom: 20, background: C.primaryLight }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ width: 64, height: 64, borderRadius: 16, background: C.primary, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>👨‍⚕️</div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 18 }}>Dr. {user.name}</div>
+            <div style={{ color: C.muted, fontSize: 13 }}>{user.specialization} • {user.unique_id}</div>
+            <div style={{ color: C.muted, fontSize: 12 }}>{user.email}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ ...s.card, padding: 20 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16, color: C.primary }}>Edit Profile</h3>
+        <Field label="Bio / About" value={profile.bio} onChange={v => setProfile(p => ({ ...p, bio: v }))} placeholder="Write about yourself, your expertise..." textarea />
+        <Field label="Clinic Name" value={profile.clinic_name} onChange={v => setProfile(p => ({ ...p, clinic_name: v }))} placeholder="e.g. City Heart Clinic" />
+        <Field label="Clinic Address" value={profile.clinic_address} onChange={v => setProfile(p => ({ ...p, clinic_address: v }))} placeholder="Full clinic address" />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <Field label="Experience (Years)" value={profile.experience_years} onChange={v => setProfile(p => ({ ...p, experience_years: v }))} placeholder="10" type="number" noMargin />
+          <Field label="Consultation Fee (₹)" value={profile.consultation_fee} onChange={v => setProfile(p => ({ ...p, consultation_fee: v }))} placeholder="500" type="number" noMargin />
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <Field label="Available Days" value={profile.available_days} onChange={v => setProfile(p => ({ ...p, available_days: v }))} placeholder="Mon, Tue, Wed, Thu, Fri" />
+          <Field label="Available Time" value={profile.available_time} onChange={v => setProfile(p => ({ ...p, available_time: v }))} placeholder="10:00 AM - 6:00 PM" />
+        </div>
+        <button onClick={saveProfile} disabled={saving} style={{ ...s.btn("primary"), width: "100%", marginTop: 8, opacity: saving ? 0.7 : 1 }}>
+          {saving ? "Saving..." : saved ? "✅ Saved!" : "💾 Save Profile"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -528,7 +582,7 @@ function PatientDashboard({ user, onLogout }) {
   }, []);
 
   async function fetchDoctors() {
-    const { data } = await supabase.from("users").select("*").eq("role", "doctor").eq("approved", true).order("name");
+    const { data } = await supabase.from("users").select("id, name, email, unique_id, specialization, clinic_name, clinic_address, experience_years, consultation_fee, available_days, available_time, bio").eq("role", "doctor").eq("approved", true).order("name");
     setDoctors(data || []);
   }
 
@@ -666,14 +720,20 @@ function PatientDashboard({ user, onLogout }) {
                   🩺 {spec}
                 </h3>
                 {docs.map(d => (
-                  <div key={d.id} style={{ ...s.card, padding: 16, marginBottom: 10, display: "flex", alignItems: "center", gap: 14 }}>
+                  <div key={d.id} style={{ ...s.card, padding: 16, marginBottom: 10, display: "flex", alignItems: "flex-start", gap: 14 }}>
                     <div style={{ width: 48, height: 48, borderRadius: 12, background: C.primaryLight, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>👨‍⚕️</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700, fontSize: 15 }}>Dr. {d.name}</div>
                       <div style={{ color: C.muted, fontSize: 13 }}>{d.specialization || "General Physician"}</div>
-                      <div style={{ marginTop: 4 }}><span style={s.badge(C.accent)}>Available on MediConnect</span></div>
+                      {d.clinic_name && <div style={{ color: C.muted, fontSize: 12, marginTop: 2 }}>🏥 {d.clinic_name}</div>}
+                      {d.clinic_address && <div style={{ color: C.muted, fontSize: 12 }}>📍 {d.clinic_address}</div>}
+                      {d.experience_years && <div style={{ color: C.muted, fontSize: 12 }}>⭐ {d.experience_years} years experience</div>}
+                      {d.consultation_fee && <div style={{ color: C.accent, fontSize: 12, fontWeight: 600 }}>💰 ₹{d.consultation_fee} consultation</div>}
+                      {d.available_days && <div style={{ color: C.muted, fontSize: 12 }}>📅 {d.available_days} • {d.available_time}</div>}
+                      {d.bio && <div style={{ color: C.muted, fontSize: 12, marginTop: 4, fontStyle: "italic" }}>"{d.bio}"</div>}
+                      <div style={{ marginTop: 6 }}><span style={s.badge(C.accent)}>Available on MediConnect</span></div>
                     </div>
-                    <div style={{ fontSize: 12, color: C.primary, fontWeight: 600 }}>ID: {d.unique_id}</div>
+                    <div style={{ fontSize: 11, color: C.primary, fontWeight: 600 }}>ID: {d.unique_id}</div>
                   </div>
                 ))}
               </div>
