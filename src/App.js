@@ -133,8 +133,7 @@ function AuthScreen({ onLogin }) {
       const { data: profile } = await supabase.from("users").select("*").eq("id", data.user.id).single();
       if (!profile) throw new Error("Profile not found.");
       if (!profile.approved && profile.role !== "admin") throw new Error("Account pending admin approval.");
-      localStorage.setItem('mc_email', form.email);
-localStorage.setItem('mc_password', form.password);
+      onLogin(profile);
     } catch (err) { setError(err.message); }
     setLoading(false);
   }
@@ -167,7 +166,7 @@ localStorage.setItem('mc_password', form.password);
       if (profileError) throw profileError;
       setScreen("home");
       setSelectedRole(null);
-      setForm({ name: "", email: localStorage.getItem('mc_email') || "", password: localStorage.getItem('mc_password') || "", specialization: "", age: "", bloodGroup: "", storeName: "", address: "", licenseNo: "" });
+      setForm({ name: "", email: "", password: "", specialization: "", age: "", bloodGroup: "", storeName: "", address: "", licenseNo: "" });
       alert("Registration successful! Please wait for admin approval.");
     } catch (err) { setError(err.message); }
     setLoading(false);
@@ -233,7 +232,32 @@ localStorage.setItem('mc_password', form.password);
           <Field label="Password" value={form.password} onChange={v => setForm(f => ({ ...f, password: v }))} placeholder="Password (min 6 chars)" type="password" />
 
           {screen === "register" && selectedRole === "doctor" && (
-            <Field label="Specialization" value={form.specialization} onChange={v => setForm(f => ({ ...f, specialization: v }))} placeholder="e.g. Cardiologist" />
+            <div style={{ marginBottom: 14 }}>
+              <label style={s.label}>Specialization</label>
+              <select value={form.specialization} onChange={e => setForm(f => ({ ...f, specialization: e.target.value }))} style={{ ...s.input, marginBottom: 0 }}>
+                <option value="">Select Specialization</option>
+                <option>Cardiologist</option>
+                <option>General Physician</option>
+                <option>Dermatologist</option>
+                <option>Orthopedic</option>
+                <option>Neurologist</option>
+                <option>Gynecologist</option>
+                <option>Pediatrician</option>
+                <option>ENT Specialist</option>
+                <option>Ophthalmologist</option>
+                <option>Psychiatrist</option>
+                <option>Urologist</option>
+                <option>Oncologist</option>
+                <option>Diabetologist</option>
+                <option>Pulmonologist</option>
+                <option>Gastroenterologist</option>
+                <option>Rheumatologist</option>
+                <option>Endocrinologist</option>
+                <option>Nephrologist</option>
+                <option>Hematologist</option>
+                <option>Other</option>
+              </select>
+            </div>
           )}
           {screen === "register" && selectedRole === "patient" && (
             <div style={{ display: "flex", gap: 10 }}>
@@ -330,8 +354,7 @@ function DoctorDashboard({ user, onLogout }) {
   const [loading, setLoading] = useState(false);
   const [otpRequestId, setOtpRequestId] = useState(null);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-useEffect(() => { fetchMyPrescriptions(); }, []);
+  useEffect(() => { fetchMyPrescriptions(); }, []);
 
   async function fetchMyPrescriptions() {
     const { data } = await supabase.from("prescriptions").select(`*, prescription_medicines(*), patient:patient_id(name, unique_id, age, blood_group)`).eq("doctor_id", user.id).order("date", { ascending: false });
@@ -495,8 +518,7 @@ function PatientDashboard({ user, onLogout }) {
   const [doctors, setDoctors] = useState([]);
   const [searchSpec, setSearchSpec] = useState("");
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-useEffect(() => {
+  useEffect(() => {
     fetchPrescriptions();
     fetchPendingRequests();
     fetchVitals();
